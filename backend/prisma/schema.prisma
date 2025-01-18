@@ -1,0 +1,76 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model chat {
+  id                        BigInt   @id @default(autoincrement())
+  timestamp                 DateTime @default(now()) @db.Timestamptz(6)
+  from_id                   BigInt
+  to_id                     BigInt
+  message                   String
+  users_chat_from_idTousers users    @relation("chat_from_idTousers", fields: [from_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "chat_from_id_fk_user_id")
+  users_chat_to_idTousers   users    @relation("chat_to_idTousers", fields: [to_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "chat_to_id_fk_user_id")
+}
+
+model connection {
+  from_id                         BigInt
+  to_id                           BigInt
+  created_at                      DateTime @db.Timestamptz(6)
+  users_connection_from_idTousers users    @relation("connection_from_idTousers", fields: [from_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "connection_from_id_fk_user_id")
+  users_connection_to_idTousers   users    @relation("connection_to_idTousers", fields: [to_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "connection_to_id_fk_user_id")
+
+  @@id([from_id, to_id])
+}
+
+model connection_request {
+  from_id                                 BigInt
+  to_id                                   BigInt
+  created_at                              DateTime @db.Timestamptz(6)
+  users_connection_request_from_idTousers users    @relation("connection_request_from_idTousers", fields: [from_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "connection_request_from_id_fk_user_id")
+  users_connection_request_to_idTousers   users    @relation("connection_request_to_idTousers", fields: [to_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "connection_request_to_id_fk_user_id")
+
+  @@id([from_id, to_id])
+}
+
+model feed {
+  id         BigInt   @id @default(autoincrement())
+  created_at DateTime @default(now()) @db.Timestamptz(6)
+  updated_at DateTime @updatedAt @db.Timestamptz(6)
+  content    String
+  user_id    BigInt
+  users      users    @relation(fields: [user_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "feed_user_id_fk_user_id")
+}
+
+model push_subscriptions {
+  endpoint   String   @id
+  user_id    BigInt?
+  keys       Json     @db.Json
+  created_at DateTime @default(now()) @db.Timestamptz(6)
+  users      users?   @relation(fields: [user_id], references: [id], onUpdate: NoAction, map: "push_subscriptions_user_id_fk")
+}
+
+model users {
+  id                                                   BigInt               @id @default(autoincrement())
+  username                                             String               @unique @db.VarChar(255)
+  email                                                String               @unique @db.VarChar(255)
+  password_hash                                        String               @db.VarChar(255)
+  full_name                                            String?              @db.VarChar(255)
+  work_history                                         String?
+  skills                                               String?
+  profile_photo_path                                   String               @db.VarChar(255)
+  created_at                                           DateTime             @default(now()) @db.Timestamptz(6)
+  updated_at                                           DateTime             @updatedAt @db.Timestamptz(6)
+  chat_chat_from_idTousers                             chat[]               @relation("chat_from_idTousers")
+  chat_chat_to_idTousers                               chat[]               @relation("chat_to_idTousers")
+  connection_connection_from_idTousers                 connection[]         @relation("connection_from_idTousers")
+  connection_connection_to_idTousers                   connection[]         @relation("connection_to_idTousers")
+  connection_request_connection_request_from_idTousers connection_request[] @relation("connection_request_from_idTousers")
+  connection_request_connection_request_to_idTousers   connection_request[] @relation("connection_request_to_idTousers")
+  feed                                                 feed[]
+  push_subscriptions                                   push_subscriptions[]
+}

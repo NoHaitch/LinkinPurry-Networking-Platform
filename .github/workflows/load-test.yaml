@@ -1,0 +1,152 @@
+name: Load Testing
+
+on: [workflow_dispatch]
+
+env:
+  ORCHESTRATOR_ENDPOINT: ${{ secrets.ORCHESTRATOR_ENDPOINT }}
+  ORCHESTRATOR_TOKEN: ${{ secrets.ORCHESTRATOR_TOKEN }}
+  DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
+  DOCKER_PASSWORD: ${{ secrets.DOCKER_PASSWORD }}
+  DOCKER_IMAGE: ${{ secrets.DOCKER_USERNAME }}/${{ secrets.TEAM_NAME }}:${{ github.sha }}
+  TEAM_NAME: ${{ secrets.TEAM_NAME }}
+
+jobs:
+  push-to-registry:
+    name: Push Docker image to Docker Hub
+    runs-on: ubuntu-latest
+    permissions:
+      packages: write
+      contents: read
+      attestations: write
+      id-token: write
+    steps:
+      - name: Check out the repo
+        uses: actions/checkout@v4
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@f4ef78c080cd8ba55a85445d5b36e214a81df20a
+        with:
+          username: ${{ env.DOCKER_USERNAME }}
+          password: ${{ env.DOCKER_PASSWORD }}
+
+      - name: Save .env file
+        run: |
+          echo ${{ secrets.ENV_FILE_BASE64 }} | base64 --decode > backend/.env
+        shell: bash
+
+      - name: Build the docker image
+        working-directory: backend
+        run: |
+          docker build -t ${{ env.DOCKER_IMAGE }} .
+
+      - name: Push the docker image
+        working-directory: backend
+        run: |
+          docker push ${{ env.DOCKER_IMAGE }}
+
+  start-server:
+    needs: push-to-registry
+    runs-on: ubuntu-latest
+    outputs:
+      server-endpoint: ${{ fromJson(steps.httpdeploy.outputs.response).endpoint }}
+    steps:
+      - name: Call start server from orchestrator
+        id: httpdeploy
+        uses: fjogeleit/http-request-action@v1
+        with:
+          url: ${{ env.ORCHESTRATOR_ENDPOINT }}/deploy
+          method: POST
+          customHeaders: '{"Authorization": "token ${{ env.ORCHESTRATOR_TOKEN }}"}'
+          data: '{"team": "${{ env.TEAM_NAME }}", "image": "${{ env.DOCKER_IMAGE }}"}'
+
+      - name: Wait for service to be healthy
+        run: |
+          INTERVAL=5   # Interval between checks in seconds
+          RETRIES=36   # Maximum number of retries
+          CHECK_URL="${{ fromJson(steps.httpdeploy.outputs.response).endpoint }}/health"  # URL to check
+
+          for ((i=0; i<RETRIES; i++)); do
+            response=$(curl --fail --silent --output /dev/null $CHECK_URL && echo "200" || echo "non-200")
+            if [[ "$response" == "200" ]]; then
+              echo "Service is healthy!"
+              exit 0
+            fi
+            echo "Health check failed, retrying in $INTERVAL seconds..."
+            sleep $INTERVAL
+          done
+
+          echo "Health check timed out after $RETRIES retries."
+          exit 1
+
+  load-test-profile:
+    needs: start-server
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Set up load testing tool
+        run: |
+          sudo gpg -k
+          sudo gpg --no-default-keyring --keyring /usr/share/keyrings/k6-archive-keyring.gpg --keyserver hkp://keyserver.ubuntu.com:80 --recv-keys C5AD17C747E3415A3642D57D77C6C491D6AC1D69
+          echo "deb [signed-by=/usr/share/keyrings/k6-archive-keyring.gpg] https://dl.k6.io/deb stable main" | sudo tee /etc/apt/sources.list.d/k6.list
+          sudo apt-get update
+          sudo apt-get install -y k6
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: "20"
+
+      - name: Install dependencies
+        run: npm install
+        working-directory: tests
+
+      - name: Test profile
+        run: npm run test:profile
+        working-directory: tests
+        env:
+          SERVER_ENDPOINT: ${{ needs.start-server.outputs.server-endpoint }}
+
+  load-test-feed:
+    needs: start-server
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Set up load testing tool
+        run: |
+          sudo gpg -k
+          sudo gpg --no-default-keyring --keyring /usr/share/keyrings/k6-archive-keyring.gpg --keyserver hkp://keyserver.ubuntu.com:80 --recv-keys C5AD17C747E3415A3642D57D77C6C491D6AC1D69
+          echo "deb [signed-by=/usr/share/keyrings/k6-archive-keyring.gpg] https://dl.k6.io/deb stable main" | sudo tee /etc/apt/sources.list.d/k6.list
+          sudo apt-get update
+          sudo apt-get install -y k6
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: "20"
+
+      - name: Install dependencies
+        run: npm install
+        working-directory: tests
+
+      - name: Test feed
+        run: npm run test:feed
+        working-directory: tests
+        env:
+          SERVER_ENDPOINT: ${{ needs.start-server.outputs.server-endpoint }}
+
+  destroy-server:
+    needs: [load-test-profile, load-test-feed]
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - name: Call destroy server from orchestrator
+        uses: fjogeleit/http-request-action@v1
+        with:
+          url: ${{ env.ORCHESTRATOR_ENDPOINT }}/destroy
+          method: DELETE
+          customHeaders: '{"Authorization": "token ${{ env.ORCHESTRATOR_TOKEN }}"}'
+          data: '{"team": "${{ env.TEAM_NAME }}"}'

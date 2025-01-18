@@ -1,0 +1,1 @@
+export const log = (req: any) => console.log(`[DEBUG] ${req.method} ${req.url} - Body: `, req.body) 

@@ -1,0 +1,1 @@
+export const ENDPOINT = __ENV.SERVER_ENDPOINT;

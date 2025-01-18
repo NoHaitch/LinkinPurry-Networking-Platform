@@ -1,0 +1,17 @@
+{
+  "name": "wbd-tests",
+  "version": "1.0.0",
+  "main": "index.js",
+  "type": "module",
+  "scripts": {
+    "test:profile": "k6 run profile.js",
+    "test:feed": "k6 run feed.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "description": "",
+  "dependencies": {
+    "k6": "^0.0.0"
+  }
+}
